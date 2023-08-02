@@ -94,7 +94,7 @@ public class SchemaCompatibilityTest extends S3SinkConnectorTestBase {
       SinkRecord sinkRecordNoSchema = new SinkRecord(TOPIC, PARTITION, Schema.STRING_SCHEMA, key, null, record, 16);
 
       // Test when both schemas are null
-      assertFalse(mode.shouldChangeSchema(sinkRecordNoSchema, null, null).isInCompatible());
+      assertFalse(mode.shouldChangeSchema(sinkRecordNoSchema, null, null));
 
       try {
         mode.shouldChangeSchema(sinkRecord, null, null);
@@ -120,8 +120,8 @@ public class SchemaCompatibilityTest extends S3SinkConnectorTestBase {
           }
           break;
         case NONE:
-          assertTrue(mode.shouldChangeSchema(sinkRecordNoVersion, null, sinkRecord.valueSchema()).isInCompatible());
-          assertFalse(mode.shouldChangeSchema(sinkRecordNoVersion, null, sinkRecordNoVersion.valueSchema()).isInCompatible());
+          assertTrue(mode.shouldChangeSchema(sinkRecordNoVersion, null, sinkRecord.valueSchema()));
+          assertFalse(mode.shouldChangeSchema(sinkRecordNoVersion, null, sinkRecordNoVersion.valueSchema()));
       }
     }
   }
@@ -142,28 +142,28 @@ public class SchemaCompatibilityTest extends S3SinkConnectorTestBase {
         case BACKWARD:
         case FULL:
           // new record has higher version
-          assertTrue(mode.shouldChangeSchema(newSinkRecord, null, sinkRecord.valueSchema()).isInCompatible());
+          assertTrue(mode.shouldChangeSchema(newSinkRecord, null, sinkRecord.valueSchema()));
           // new record has lower version
-          assertFalse(mode.shouldChangeSchema(sinkRecord, null, newSinkRecord.valueSchema()).isInCompatible());
+          assertFalse(mode.shouldChangeSchema(sinkRecord, null, newSinkRecord.valueSchema()));
           // Same
-          assertFalse(mode.shouldChangeSchema(sinkRecord, null, sinkRecord.valueSchema()).isInCompatible());
+          assertFalse(mode.shouldChangeSchema(sinkRecord, null, sinkRecord.valueSchema()));
           break;
         case FORWARD:
           // new record has higher version
-          assertFalse(mode.shouldChangeSchema(newSinkRecord, null, sinkRecord.valueSchema()).isInCompatible());
+          assertFalse(mode.shouldChangeSchema(newSinkRecord, null, sinkRecord.valueSchema()));
           // new record has lower version
-          assertTrue(mode.shouldChangeSchema(sinkRecord, null, newSinkRecord.valueSchema()).isInCompatible());
+          assertTrue(mode.shouldChangeSchema(sinkRecord, null, newSinkRecord.valueSchema()));
           // Same
-          assertFalse(mode.shouldChangeSchema(sinkRecord, null, sinkRecord.valueSchema()).isInCompatible());
+          assertFalse(mode.shouldChangeSchema(sinkRecord, null, sinkRecord.valueSchema()));
           break;
         case NONE:
         default:
           // new record has higher version
-          assertTrue(mode.shouldChangeSchema(newSinkRecord, null, sinkRecord.valueSchema()).isInCompatible());
+          assertTrue(mode.shouldChangeSchema(newSinkRecord, null, sinkRecord.valueSchema()));
           // new record has lower version
-          assertTrue(mode.shouldChangeSchema(sinkRecord, null, newSinkRecord.valueSchema()).isInCompatible());
+          assertTrue(mode.shouldChangeSchema(sinkRecord, null, newSinkRecord.valueSchema()));
           // Same
-          assertFalse(mode.shouldChangeSchema(sinkRecord, null, sinkRecord.valueSchema()).isInCompatible());
+          assertFalse(mode.shouldChangeSchema(sinkRecord, null, sinkRecord.valueSchema()));
       }
     }
   }

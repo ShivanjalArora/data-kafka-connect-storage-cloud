@@ -16,6 +16,8 @@
 package io.confluent.connect.s3.storage;
 
 import com.amazonaws.AmazonClientException;
+import com.amazonaws.AmazonServiceException;
+import com.amazonaws.AmazonServiceException.ErrorType;
 import com.amazonaws.event.ProgressEvent;
 import com.amazonaws.event.ProgressListener;
 import com.amazonaws.services.s3.AmazonS3;
@@ -31,6 +33,8 @@ import com.amazonaws.services.s3.model.SSECustomerKey;
 import com.amazonaws.services.s3.model.UploadPartRequest;
 import io.confluent.connect.s3.S3SinkConnectorConfig;
 import io.confluent.connect.storage.common.util.StringUtils;
+import org.apache.kafka.connect.errors.ConnectException;
+import org.apache.kafka.connect.errors.DataException;
 import org.apache.parquet.io.PositionOutputStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,9 +42,9 @@ import org.slf4j.LoggerFactory;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Supplier;
 
 /**
  * Output stream enabling multi-part uploads of Kafka records.
@@ -50,6 +54,7 @@ import java.util.function.Supplier;
 public class S3OutputStream extends PositionOutputStream {
   private static final Logger log = LoggerFactory.getLogger(S3OutputStream.class);
   private final AmazonS3 s3;
+  private final S3SinkConnectorConfig connectorConfig;
   private final String bucket;
   private final String key;
   private final String ssea;
@@ -59,7 +64,7 @@ public class S3OutputStream extends PositionOutputStream {
   private final int partSize;
   private final CannedAccessControlList cannedAcl;
   private boolean closed;
-  private final ByteBuf buffer;
+  private ByteBuffer buffer;
   private MultipartUpload multiPartUpload;
   private final CompressionType compressionType;
   private final int compressionLevel;
@@ -68,6 +73,7 @@ public class S3OutputStream extends PositionOutputStream {
 
   public S3OutputStream(String key, S3SinkConnectorConfig conf, AmazonS3 s3) {
     this.s3 = s3;
+    this.connectorConfig = conf;
     this.bucket = conf.getBucketName();
     this.key = key;
     this.ssea = conf.getSsea();
@@ -79,21 +85,13 @@ public class S3OutputStream extends PositionOutputStream {
     this.partSize = conf.getPartSize();
     this.cannedAcl = conf.getCannedAcl();
     this.closed = false;
-
-    final boolean elasticBufEnable = conf.getElasticBufferEnable();
-    if (elasticBufEnable) {
-      final int elasticBufInitialCap = conf.getElasticBufferInitCap();
-      this.buffer = new ElasticByteBuffer(this.partSize, elasticBufInitialCap);
-    } else {
-      this.buffer = new SimpleByteBuffer(this.partSize);
-    }
-
+    this.buffer = ByteBuffer.allocate(this.partSize);
     this.progressListener = new ConnectProgressListener();
     this.multiPartUpload = null;
     this.compressionType = conf.getCompressionType();
     this.compressionLevel = conf.getCompressionLevel();
     this.position = 0L;
-    log.info("Create S3OutputStream for bucket '{}' key '{}'", bucket, key);
+    log.debug("Create S3OutputStream for bucket '{}' key '{}'", bucket, key);
   }
 
   @Override
@@ -148,7 +146,7 @@ public class S3OutputStream extends PositionOutputStream {
         multiPartUpload.abort();
         log.debug("Multipart upload aborted for bucket '{}' key '{}'.", bucket, key);
       }
-      throw new IOException("Part upload failed: ", e);
+      throw new IOException("Part upload failed: ", e.getCause());
     }
   }
 
@@ -170,13 +168,8 @@ public class S3OutputStream extends PositionOutputStream {
       multiPartUpload.complete();
       log.debug("Upload complete for bucket '{}' key '{}'", bucket, key);
     } catch (IOException e) {
-      log.error(
-          "Multipart upload failed to complete for bucket '{}' key '{}'. Reason: {}",
-          bucket,
-          key,
-          e.getMessage()
-      );
-      throw e;
+      log.error("Multipart upload failed to complete for bucket '{}' key '{}'", bucket, key);
+      throw new DataException("Multipart upload failed to complete.", e);
     } finally {
       buffer.clear();
       multiPartUpload = null;
@@ -225,26 +218,19 @@ public class S3OutputStream extends PositionOutputStream {
       initRequest.setSSECustomerKey(sseCustomerKey);
     }
 
-    return handleAmazonExceptions(
-      () -> new MultipartUpload(s3.initiateMultipartUpload(initRequest).getUploadId())
-    );
-  }
-
-  /**
-   * Return the given Supplier value, converting any thrown AmazonClientException object
-   * to an IOException object (containing the AmazonClientException object) and
-   * throw that instead.
-   * @param supplier The supplier to evaluate
-   * @param <T> The object type returned by the Supplier
-   * @return The value returned by the Supplier
-   * @throws IOException Any IOException or AmazonClientException thrown while
-   *                     retreiving the Supplier's value
-   */
-  private static <T> T handleAmazonExceptions(Supplier<T> supplier) throws IOException {
     try {
-      return supplier.get();
+      return new MultipartUpload(s3.initiateMultipartUpload(initRequest).getUploadId());
+    } catch (AmazonServiceException e) {
+      if (e.getErrorType() == ErrorType.Client) {
+        // S3 documentation states that this error type means there is a problem with the request
+        // and that retrying this request will not result in a successful response. This includes
+        // errors such as incorrect access keys, invalid parameter values, missing parameters, etc.
+        // Therefore, the connector should propagate this exception and fail.
+        throw new ConnectException("Unable to initiate MultipartUpload", e);
+      }
+      throw new IOException("Unable to initiate MultipartUpload.", e);
     } catch (AmazonClientException e) {
-      throw new IOException(e.getMessage(), e);
+      throw new IOException("Unable to initiate MultipartUpload.", e);
     }
   }
 
@@ -278,14 +264,11 @@ public class S3OutputStream extends PositionOutputStream {
       partETags.add(s3.uploadPart(request).getPartETag());
     }
 
-    public void complete() throws IOException {
+    public void complete() {
       log.debug("Completing multi-part upload for key '{}', id '{}'", key, uploadId);
       CompleteMultipartUploadRequest completeRequest =
           new CompleteMultipartUploadRequest(bucket, key, uploadId, partETags);
-
-      handleAmazonExceptions(
-          () -> s3.completeMultipartUpload(completeRequest)
-      );
+      s3.completeMultipartUpload(completeRequest);
     }
 
     public void abort() {

@@ -19,6 +19,8 @@ import com.amazonaws.ClientConfiguration;
 import com.amazonaws.PredefinedClientConfigurations;
 import com.amazonaws.SdkClientException;
 import com.amazonaws.auth.AWSCredentialsProvider;
+import com.amazonaws.auth.AWSStaticCredentialsProvider;
+import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.client.builder.AwsClientBuilder;
 import com.amazonaws.regions.Regions;
 import com.amazonaws.retry.PredefinedBackoffStrategies;
@@ -45,6 +47,8 @@ import io.confluent.connect.s3.util.Version;
 import io.confluent.connect.storage.Storage;
 import io.confluent.connect.storage.common.util.StringUtils;
 
+import static io.confluent.connect.s3.S3SinkConnectorConfig.AWS_ACCESS_KEY_ID_CONFIG;
+import static io.confluent.connect.s3.S3SinkConnectorConfig.AWS_SECRET_ACCESS_KEY_CONFIG;
 import static io.confluent.connect.s3.S3SinkConnectorConfig.REGION_CONFIG;
 import static io.confluent.connect.s3.S3SinkConnectorConfig.S3_PATH_STYLE_ACCESS_ENABLED_CONFIG;
 import static io.confluent.connect.s3.S3SinkConnectorConfig.S3_PROXY_URL_CONFIG;
@@ -86,7 +90,6 @@ public class S3Storage implements Storage<S3SinkConnectorConfig, ObjectListing> 
    * @return S3 client
    */
   public AmazonS3 newS3Client(S3SinkConnectorConfig config) {
-    log.info("Creating S3 client.");
     ClientConfiguration clientConfiguration = newClientConfiguration(config);
     AmazonS3ClientBuilder builder = AmazonS3ClientBuilder.standard()
         .withAccelerateModeEnabled(config.getBoolean(WAN_MODE_CONFIG))
@@ -104,7 +107,7 @@ public class S3Storage implements Storage<S3SinkConnectorConfig, ObjectListing> 
           new AwsClientBuilder.EndpointConfiguration(url, region)
       );
     }
-    log.info("S3 client created");
+
     return builder.build();
   }
 
@@ -167,13 +170,21 @@ public class S3Storage implements Storage<S3SinkConnectorConfig, ObjectListing> 
         conf.getS3PartRetries(),
         false
     );
-    log.info("Created a retry policy for the connector");
     return retryPolicy;
   }
 
   protected AWSCredentialsProvider newCredentialsProvider(S3SinkConnectorConfig config) {
-    log.info("Returning new credentials provider based on the configured "
-           + "credentials provider class");
+    final String accessKeyId = config.getString(AWS_ACCESS_KEY_ID_CONFIG);
+    final String secretKey = config.getPassword(AWS_SECRET_ACCESS_KEY_CONFIG).value();
+    if (StringUtils.isNotBlank(accessKeyId) && StringUtils.isNotBlank(secretKey)) {
+      log.info("Returning new credentials provider using the access key id and "
+          + "the secret access key that were directly supplied through the connector's "
+          + "configuration");
+      BasicAWSCredentials basicCredentials = new BasicAWSCredentials(accessKeyId, secretKey);
+      return new AWSStaticCredentialsProvider(basicCredentials);
+    }
+    log.info(
+        "Returning new credentials provider based on the configured credentials provider class");
     return config.getCredentialsProvider();
   }
 
@@ -193,26 +204,22 @@ public class S3Storage implements Storage<S3SinkConnectorConfig, ObjectListing> 
 
   @Override
   public OutputStream create(String path, S3SinkConnectorConfig conf, boolean overwrite) {
-    return create(path, overwrite, this.conf.getClass(S3SinkConnectorConfig.FORMAT_CLASS_CONFIG));
+    return create(path, overwrite);
   }
 
-  public S3OutputStream create(String path, boolean overwrite, Class<?> formatClass) {
-    log.info("Creating S3 output stream.");
+  public S3OutputStream create(String path, boolean overwrite) {
     if (!overwrite) {
-      log.debug("Creating a file without overwriting is not currently supported in S3 Connector");
       throw new UnsupportedOperationException(
           "Creating a file without overwriting is not currently supported in S3 Connector"
       );
     }
 
     if (StringUtils.isBlank(path)) {
-      log.debug("Path can not be empty!");
       throw new IllegalArgumentException("Path can not be empty!");
     }
 
-    if (ParquetFormat.class.isAssignableFrom(formatClass)) {
-      log.info("Create S3ParquetOutputStream for bucket '{}' key '{}'",
-              this.conf.getBucketName(), path);
+    if (ParquetFormat.class.isAssignableFrom(
+        this.conf.getClass(S3SinkConnectorConfig.FORMAT_CLASS_CONFIG))) {
       return new S3ParquetOutputStream(path, this.conf, s3);
     } else {
       // currently ignore what is passed as method argument.
@@ -263,7 +270,6 @@ public class S3Storage implements Storage<S3SinkConnectorConfig, ObjectListing> 
 
   @Override
   public SeekableInput open(String path, S3SinkConnectorConfig conf) {
-    log.debug("File reading is not currently supported in S3 Connector");
     throw new UnsupportedOperationException(
         "File reading is not currently supported in S3 Connector"
     );

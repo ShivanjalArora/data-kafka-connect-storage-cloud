@@ -31,7 +31,6 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import io.confluent.connect.s3.auth.AwsAssumeRoleCredentialsProvider;
@@ -48,10 +47,6 @@ import io.confluent.connect.storage.partitioner.PartitionerConfig;
 import io.confluent.connect.storage.partitioner.TimeBasedPartitioner;
 import io.confluent.connect.avro.AvroDataConfig;
 
-import static io.confluent.connect.s3.S3SinkConnectorConfig.AffixType;
-import static io.confluent.connect.s3.S3SinkConnectorConfig.HEADERS_FORMAT_CLASS_CONFIG;
-import static io.confluent.connect.s3.S3SinkConnectorConfig.KEYS_FORMAT_CLASS_CONFIG;
-import static io.confluent.connect.s3.S3SinkConnectorConfig.SCHEMA_PARTITION_AFFIX_TYPE_CONFIG;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
@@ -115,24 +110,21 @@ public class S3SinkConnectorConfigTest extends S3SinkConnectorTestBase {
         TimeBasedPartitioner.class,
         FieldPartitioner.class
     );
-    List<Object> expectedSchemaPartitionerAffixTypes = Arrays.stream(
-        S3SinkConnectorConfig.AffixType.names()).collect(Collectors.toList());
 
     List<ConfigValue> values = S3SinkConnectorConfig.getConfig().validate(properties);
     for (ConfigValue val : values) {
-      switch (val.name()) {
-        case StorageCommonConfig.STORAGE_CLASS_CONFIG:
-          assertEquals(expectedStorageClasses, val.recommendedValues());
-          break;
-        case S3SinkConnectorConfig.FORMAT_CLASS_CONFIG:
-          assertEquals(expectedFormatClasses, val.recommendedValues());
-          break;
-        case PartitionerConfig.PARTITIONER_CLASS_CONFIG:
-          assertEquals(expectedPartitionerClasses, val.recommendedValues());
-          break;
-        case SCHEMA_PARTITION_AFFIX_TYPE_CONFIG:
-          assertEquals(expectedSchemaPartitionerAffixTypes, val.recommendedValues());
-          break;
+      if (val.value() instanceof Class) {
+        switch (val.name()) {
+          case StorageCommonConfig.STORAGE_CLASS_CONFIG:
+            assertEquals(expectedStorageClasses, val.recommendedValues());
+            break;
+          case S3SinkConnectorConfig.FORMAT_CLASS_CONFIG:
+            assertEquals(expectedFormatClasses, val.recommendedValues());
+            break;
+          case PartitionerConfig.PARTITIONER_CLASS_CONFIG:
+            assertEquals(expectedPartitionerClasses, val.recommendedValues());
+            break;
+        }
       }
     }
   }
@@ -220,7 +212,7 @@ public class S3SinkConnectorConfigTest extends S3SinkConnectorTestBase {
     );
     properties.put(
         configPrefix.concat(DummyAssertiveCredentialsProvider.CONFIGS_NUM_KEY_NAME),
-        "5"
+        "3"
     );
     connectorConfig = new S3SinkConnectorConfig(properties);
 
@@ -327,16 +319,6 @@ public class S3SinkConnectorConfigTest extends S3SinkConnectorTestBase {
     properties.put(S3SinkConnectorConfig.S3_OBJECT_TAGGING_CONFIG, "false");
     connectorConfig = new S3SinkConnectorConfig(properties);
     assertEquals(false, connectorConfig.get(S3SinkConnectorConfig.S3_OBJECT_TAGGING_CONFIG));
-
-    properties.put(S3SinkConnectorConfig.S3_OBJECT_BEHAVIOR_ON_TAGGING_ERROR_CONFIG, "ignore");
-    connectorConfig = new S3SinkConnectorConfig(properties);
-    assertEquals("ignore",
-            connectorConfig.get(S3SinkConnectorConfig.S3_OBJECT_BEHAVIOR_ON_TAGGING_ERROR_CONFIG));
-
-    properties.put(S3SinkConnectorConfig.S3_OBJECT_BEHAVIOR_ON_TAGGING_ERROR_CONFIG, "fail");
-    connectorConfig = new S3SinkConnectorConfig(properties);
-    assertEquals("fail",
-            connectorConfig.get(S3SinkConnectorConfig.S3_OBJECT_BEHAVIOR_ON_TAGGING_ERROR_CONFIG));
   }
 
   private void assertDefaultPartitionerVisibility(List<ConfigValue> values) {
@@ -500,110 +482,6 @@ public class S3SinkConnectorConfigTest extends S3SinkConnectorTestBase {
     } catch (ConfigException e) {
       assertEquals(expectedError, e.getMessage());
     }
-  }
-
-  @Test
-  public void testKeyStorageDefaultFalse() {
-    connectorConfig = new S3SinkConnectorConfig(properties);
-    assertFalse(connectorConfig.getBoolean(S3SinkConnectorConfig.STORE_KAFKA_KEYS_CONFIG));
-  }
-
-  @Test
-  public void testKeyStorageSupported() {
-    properties.put(S3SinkConnectorConfig.STORE_KAFKA_KEYS_CONFIG, "true");
-    connectorConfig = new S3SinkConnectorConfig(properties);
-    assertTrue(connectorConfig.getBoolean(S3SinkConnectorConfig.STORE_KAFKA_KEYS_CONFIG));
-  }
-
-  @Test
-  public void testKeyFormatClassDefault() {
-    connectorConfig = new S3SinkConnectorConfig(properties);
-    assertEquals(AvroFormat.class, connectorConfig.getClass(KEYS_FORMAT_CLASS_CONFIG));
-  }
-
-  @Test
-  public void testKeyFormatClassSupported() {
-    properties.put(KEYS_FORMAT_CLASS_CONFIG, AvroFormat.class.getCanonicalName());
-    connectorConfig = new S3SinkConnectorConfig(properties);
-    assertEquals(AvroFormat.class, connectorConfig.getClass(KEYS_FORMAT_CLASS_CONFIG));
-
-    properties.put(KEYS_FORMAT_CLASS_CONFIG, JsonFormat.class.getCanonicalName());
-    connectorConfig = new S3SinkConnectorConfig(properties);
-    assertEquals(JsonFormat.class, connectorConfig.getClass(KEYS_FORMAT_CLASS_CONFIG));
-
-    properties.put(KEYS_FORMAT_CLASS_CONFIG, ByteArrayFormat.class.getCanonicalName());
-    connectorConfig = new S3SinkConnectorConfig(properties);
-    assertEquals(ByteArrayFormat.class, connectorConfig.getClass(KEYS_FORMAT_CLASS_CONFIG));
-
-    properties.put(KEYS_FORMAT_CLASS_CONFIG, ParquetFormat.class.getCanonicalName());
-    connectorConfig = new S3SinkConnectorConfig(properties);
-    assertEquals(ParquetFormat.class, connectorConfig.getClass(KEYS_FORMAT_CLASS_CONFIG));
-  }
-
-  @Test
-  public void testHeaderStorageDefaultFalse() {
-    connectorConfig = new S3SinkConnectorConfig(properties);
-    assertFalse(connectorConfig.getBoolean(S3SinkConnectorConfig.STORE_KAFKA_HEADERS_CONFIG));
-  }
-
-  @Test
-  public void testHeaderStorageSupported() {
-    properties.put(S3SinkConnectorConfig.STORE_KAFKA_HEADERS_CONFIG, "true");
-    connectorConfig = new S3SinkConnectorConfig(properties);
-    assertTrue(connectorConfig.getBoolean(S3SinkConnectorConfig.STORE_KAFKA_HEADERS_CONFIG));
-  }
-
-  @Test
-  public void testHeaderFormatClassDefault() {
-    connectorConfig = new S3SinkConnectorConfig(properties);
-    assertEquals(AvroFormat.class, connectorConfig.getClass(HEADERS_FORMAT_CLASS_CONFIG));
-  }
-
-  @Test
-  public void testHeaderFormatClassSupported() {
-    properties.put(HEADERS_FORMAT_CLASS_CONFIG, AvroFormat.class.getCanonicalName());
-    connectorConfig = new S3SinkConnectorConfig(properties);
-    assertEquals(AvroFormat.class, connectorConfig.getClass(HEADERS_FORMAT_CLASS_CONFIG));
-
-    properties.put(HEADERS_FORMAT_CLASS_CONFIG, JsonFormat.class.getCanonicalName());
-    connectorConfig = new S3SinkConnectorConfig(properties);
-    assertEquals(JsonFormat.class, connectorConfig.getClass(HEADERS_FORMAT_CLASS_CONFIG));
-
-    properties.put(HEADERS_FORMAT_CLASS_CONFIG, ByteArrayFormat.class.getCanonicalName());
-    connectorConfig = new S3SinkConnectorConfig(properties);
-    assertEquals(ByteArrayFormat.class, connectorConfig.getClass(HEADERS_FORMAT_CLASS_CONFIG));
-
-    properties.put(HEADERS_FORMAT_CLASS_CONFIG, ParquetFormat.class.getCanonicalName());
-    connectorConfig = new S3SinkConnectorConfig(properties);
-    assertEquals(ParquetFormat.class, connectorConfig.getClass(HEADERS_FORMAT_CLASS_CONFIG));
-  }
-
-  @Test
-  public void testSchemaPartitionerAffixTypDefault() {
-    properties.remove(SCHEMA_PARTITION_AFFIX_TYPE_CONFIG);
-    connectorConfig = new S3SinkConnectorConfig(properties);
-    assertEquals(AffixType.NONE, connectorConfig.getSchemaPartitionAffixType());
-  }
-
-  @Test
-  public void testSchemaPartitionerAffixType() {
-    properties.put(SCHEMA_PARTITION_AFFIX_TYPE_CONFIG, AffixType.NONE.name());
-    connectorConfig = new S3SinkConnectorConfig(properties);
-    assertEquals(AffixType.NONE, connectorConfig.getSchemaPartitionAffixType());
-
-    properties.put(SCHEMA_PARTITION_AFFIX_TYPE_CONFIG, AffixType.PREFIX.name());
-    connectorConfig = new S3SinkConnectorConfig(properties);
-    assertEquals(AffixType.PREFIX, connectorConfig.getSchemaPartitionAffixType());
-
-    properties.put(SCHEMA_PARTITION_AFFIX_TYPE_CONFIG, AffixType.SUFFIX.name());
-    connectorConfig = new S3SinkConnectorConfig(properties);
-    assertEquals(S3SinkConnectorConfig.AffixType.SUFFIX, connectorConfig.getSchemaPartitionAffixType());
-  }
-
-  @Test(expected = ConfigException.class)
-  public void testSchemaPartitionerAffixTypeExceptionOnWrongValue() {
-    properties.put(SCHEMA_PARTITION_AFFIX_TYPE_CONFIG, "Random");
-    new S3SinkConnectorConfig(properties);
   }
 }
 

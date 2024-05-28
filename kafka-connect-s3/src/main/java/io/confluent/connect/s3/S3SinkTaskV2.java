@@ -1,7 +1,6 @@
 package io.confluent.connect.s3;
 
 import com.hotstar.utils.StatsDClient;
-import com.hotstar.data.model.event.json.EventPayload;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.apache.kafka.connect.transforms.CoerceToSegmentPayload;
@@ -14,12 +13,17 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import com.hotstar.kafka.connect.transforms.ProtoToPayloadTransform;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.Map;
 
 import static com.hotstar.constants.Constants.EVENT_NAME_TAG;
 import static com.hotstar.kafka.connect.transforms.util.StatsDConstants.STATSD_HOST_DEFAULT;
 import static com.hotstar.kafka.connect.transforms.util.StatsDConstants.STATSD_PORT_DEFAULT;
 
 public class S3SinkTaskV2 extends S3SinkTask {
+    public static final Logger log = LoggerFactory.getLogger(S3SinkTaskV2.class);
     private static final ProtoToPayloadTransform.Value<SinkRecord> protoToPayloadTransform = new ProtoToPayloadTransform.Value<>();
     private static final CoerceToSegmentPayload<SinkRecord> coerceToSegmentPayloadTransform = new CoerceToSegmentPayload.Value<>();
 
@@ -42,24 +46,22 @@ public class S3SinkTaskV2 extends S3SinkTask {
             return;
         }
         SinkRecord firstRecord = transformedRecords.get(0);
-        long eventReceivedTimeMs = -1;
+        long eventReceivedTimeMs = 0L;
         try {
-            EventPayload eventPayload = (EventPayload) firstRecord.value();
-            Object eventReceivedTimeMsObj = eventPayload.getEventProperties().get("ts_received_ms");
-            if (eventReceivedTimeMsObj instanceof Long) {
-                eventReceivedTimeMs = (Long) eventReceivedTimeMsObj;
-            } else {
-                throw new ClassCastException("eventReceivedTimeMs is not a valid long type: " + eventReceivedTimeMsObj.getClass().getName());
-            }
+            Map<String, Object> eventPayload = (Map<String, Object>) firstRecord.value();
+            Map<String, Object> properties = (Map<String, Object>) eventPayload.get("properties");
+            eventReceivedTimeMs = (Long) properties.get("ts_received_ms");
+            // log.warn("ts_received_ms: " + eventReceivedTimeMs);
         } catch (ClassCastException | NullPointerException ex) {
-            log.error("Error while extracting eventReceivedTimeMs from the event payload", ex);
-
+            // Skip the record if it doesn't have the required fields, do nothing
+            // TODO : Remove this log before merging for production
+            // log.warn("Skipping the record as it doesn't have the required fields", ex);
         }
         String eventNameTag = String.format(EVENT_NAME_TAG, firstRecord.topic());
         long putStartTime = System.nanoTime();
         super.put(transformedRecords);
         statsDClient.timing("put.time", System.nanoTime()-putStartTime, eventNameTag);
-        statsDClient.gauge("event.receivedTimeMs", eventReceivedTimeMs, eventNameTag);
+        statsDClient.gauge("batch.ts_received_ms", eventReceivedTimeMs, eventNameTag);
     }
 
     private Collection<SinkRecord> transformInParallel(Collection<SinkRecord> sinkRecords) {

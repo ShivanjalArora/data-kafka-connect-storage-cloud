@@ -1,6 +1,7 @@
 package io.confluent.connect.s3;
 
 import com.hotstar.utils.StatsDClient;
+import com.hotstar.data.model.event.json.EventPayload;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.apache.kafka.connect.transforms.CoerceToSegmentPayload;
@@ -40,10 +41,25 @@ public class S3SinkTaskV2 extends S3SinkTask {
         if(transformedRecords.isEmpty()){
             return;
         }
-        String eventNameTag = String.format(EVENT_NAME_TAG, transformedRecords.get(0).topic());
+        SinkRecord firstRecord = transformedRecords.get(0);
+        long eventReceivedTimeMs = -1;
+        try {
+            EventPayload eventPayload = (EventPayload) firstRecord.value();
+            Object eventReceivedTimeMsObj = eventPayload.getEventProperties().get("ts_received_ms");
+            if (eventReceivedTimeMsObj instanceof Long) {
+                eventReceivedTimeMs = (Long) eventReceivedTimeMsObj;
+            } else {
+                throw new ClassCastException("eventReceivedTimeMs is not a valid long type: " + eventReceivedTimeMsObj.getClass().getName());
+            }
+        } catch (ClassCastException | NullPointerException ex) {
+            log.error("Error while extracting eventReceivedTimeMs from the event payload", ex);
+
+        }
+        String eventNameTag = String.format(EVENT_NAME_TAG, firstRecord.topic());
         long putStartTime = System.nanoTime();
         super.put(transformedRecords);
         statsDClient.timing("put.time", System.nanoTime()-putStartTime, eventNameTag);
+        statsDClient.gauge("event.receivedTimeMs", eventReceivedTimeMs, eventNameTag);
     }
 
     private Collection<SinkRecord> transformInParallel(Collection<SinkRecord> sinkRecords) {

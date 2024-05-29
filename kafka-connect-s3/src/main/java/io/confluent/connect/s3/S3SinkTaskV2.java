@@ -24,6 +24,7 @@ import static com.hotstar.kafka.connect.transforms.util.StatsDConstants.STATSD_P
 
 public class S3SinkTaskV2 extends S3SinkTask {
     public static final Logger log = LoggerFactory.getLogger(S3SinkTaskV2.class);
+    public static final String KAFKA_PARTITION_TAG = "partition:%s";
     private static final ProtoToPayloadTransform.Value<SinkRecord> protoToPayloadTransform = new ProtoToPayloadTransform.Value<>();
     private static final CoerceToSegmentPayload<SinkRecord> coerceToSegmentPayloadTransform = new CoerceToSegmentPayload.Value<>();
 
@@ -57,10 +58,11 @@ public class S3SinkTaskV2 extends S3SinkTask {
             // log.warn("Skipping the record as it doesn't have the required fields", ex);
         }
         String eventNameTag = String.format(EVENT_NAME_TAG, firstRecord.topic());
+        String partitionTag = String.format(KAFKA_PARTITION_TAG, firstRecord.kafkaPartition().toString());
         long putStartTime = System.nanoTime();
         super.put(transformedRecords);
         statsDClient.timing("put.time", System.nanoTime()-putStartTime, eventNameTag);
-        statsDClient.gauge("batch.ts_received_ms", eventReceivedTimeMs, eventNameTag);
+        statsDClient.gauge("batch.ts_received_ms", eventReceivedTimeMs, eventNameTag, partitionTag);
     }
 
     private Collection<SinkRecord> transformInParallel(Collection<SinkRecord> sinkRecords) {

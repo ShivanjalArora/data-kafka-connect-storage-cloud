@@ -54,7 +54,6 @@ public class S3SinkTaskV2 extends S3SinkTask {
             // log.warn("ts_received_ms: " + eventReceivedTimeMs);
         } catch (ClassCastException | NullPointerException ex) {
             // Skip the record if it doesn't have the required fields, do nothing
-            // TODO : Remove this log before merging for production
             // log.warn("Skipping the record as it doesn't have the required fields", ex);
         }
         String eventNameTag = String.format(EVENT_NAME_TAG, firstRecord.topic());

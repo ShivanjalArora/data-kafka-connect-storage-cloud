@@ -13,12 +13,17 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import com.hotstar.kafka.connect.transforms.ProtoToPayloadTransform;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.Map;
 
 import static com.hotstar.constants.Constants.EVENT_NAME_TAG;
 import static com.hotstar.kafka.connect.transforms.util.StatsDConstants.STATSD_HOST_DEFAULT;
 import static com.hotstar.kafka.connect.transforms.util.StatsDConstants.STATSD_PORT_DEFAULT;
 
 public class S3SinkTaskV2 extends S3SinkTask {
+    public static final Logger log = LoggerFactory.getLogger(S3SinkTaskV2.class);
     private static final ProtoToPayloadTransform.Value<SinkRecord> protoToPayloadTransform = new ProtoToPayloadTransform.Value<>();
     private static final CoerceToSegmentPayload<SinkRecord> coerceToSegmentPayloadTransform = new CoerceToSegmentPayload.Value<>();
 
@@ -40,10 +45,22 @@ public class S3SinkTaskV2 extends S3SinkTask {
         if(transformedRecords.isEmpty()){
             return;
         }
-        String eventNameTag = String.format(EVENT_NAME_TAG, transformedRecords.get(0).topic());
+        SinkRecord firstRecord = transformedRecords.get(0);
+        long eventReceivedTimeMs = 0L;
+        try {
+            Map<String, Object> eventPayload = (Map<String, Object>) firstRecord.value();
+            Map<String, Object> properties = (Map<String, Object>) eventPayload.get("properties");
+            eventReceivedTimeMs = (Long) properties.get("ts_received_ms");
+            // log.warn("ts_received_ms: " + eventReceivedTimeMs);
+        } catch (ClassCastException | NullPointerException ex) {
+            // Skip the record if it doesn't have the required fields, do nothing
+            // log.warn("Skipping the record as it doesn't have the required fields", ex);
+        }
+        String eventNameTag = String.format(EVENT_NAME_TAG, firstRecord.topic());
         long putStartTime = System.nanoTime();
         super.put(transformedRecords);
         statsDClient.timing("put.time", System.nanoTime()-putStartTime, eventNameTag);
+        statsDClient.gauge("batch.ts_received_ms", eventReceivedTimeMs, eventNameTag);
     }
 
     private Collection<SinkRecord> transformInParallel(Collection<SinkRecord> sinkRecords) {

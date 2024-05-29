@@ -45,7 +45,7 @@ import io.confluent.connect.storage.partitioner.Partitioner;
 import io.confluent.connect.storage.partitioner.PartitionerConfig;
 
 public class S3SinkTask extends SinkTask {
-  public static final Logger log = LoggerFactory.getLogger(S3SinkTask.class);
+  private static final Logger log = LoggerFactory.getLogger(S3SinkTask.class);
 
   private S3SinkConnectorConfig connectorConfig;
   private String url;
